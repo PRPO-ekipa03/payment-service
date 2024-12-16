@@ -9,9 +9,9 @@ import si.uni.prpo.group03.paymentservice.mapper.PaymentMapper;
 import si.uni.prpo.group03.paymentservice.repository.PaymentRepository;
 import si.uni.prpo.group03.paymentservice.service.interfaces.PayPalService;
 import si.uni.prpo.group03.paymentservice.config.PayPalConfig;
+import si.uni.prpo.group03.paymentservice.exception.*;
+
 import com.paypal.orders.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -20,8 +20,6 @@ import java.util.List;
 
 @Service
 public class PayPalServiceImpl implements PayPalService {
-
-    private static final Logger logger = LoggerFactory.getLogger(PayPalServiceImpl.class);
 
     private final PayPalClient payPalClient;
     private final RabbitTemplate rabbitTemplate;
@@ -41,7 +39,7 @@ public class PayPalServiceImpl implements PayPalService {
     }
 
     @Override
-    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId) throws IOException {
+    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId) {
         OrderRequest orderRequest = new OrderRequest();
         orderRequest.checkoutPaymentIntent("CAPTURE");
 
@@ -62,32 +60,39 @@ public class PayPalServiceImpl implements PayPalService {
         );
         orderRequest.purchaseUnits(purchaseUnits);
 
-        Order createdOrder = payPalClient.createOrder(orderRequest);
-        String paypalOrderId = createdOrder.id();
+        try {
+            Order createdOrder = payPalClient.createOrder(orderRequest);
+            String paypalOrderId = createdOrder.id();
 
-        Payment payment = paymentMapper.toPayment(paymentRequest);
-        payment.setUserId(1L); // Set user ID accordingly - 1 used for testing
-        payment.setPaypalOrderId(paypalOrderId);
-        payment.setStatus(PaymentStatus.CREATED);
-        payment.setCreatedAt(new Timestamp(System.currentTimeMillis()));
-        payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
-        payment.setReservationId(reservationId);
-        paymentRepository.save(payment);
+            Payment payment = paymentMapper.toPayment(paymentRequest);
+            payment.setUserId(1L); // Set user ID accordingly - 1 used for testing
+            payment.setPaypalOrderId(paypalOrderId);
+            payment.setStatus(PaymentStatus.CREATED);
+            payment.setCreatedAt(new Timestamp(System.currentTimeMillis()));
+            payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
+            payment.setReservationId(reservationId);
+            paymentRepository.save(payment);
 
-        for (LinkDescription link : createdOrder.links()) {
-            if ("approve".equals(link.rel())) {
-                return link.href(); // Redirect URL for approval
+            for (LinkDescription link : createdOrder.links()) {
+                if ("approve".equals(link.rel())) {
+                    return link.href(); // Redirect URL for approval
+                }
             }
+            return null;
+        } catch (IOException e) {
+            throw new OrderCreationException("Failed to create PayPal order", e);
         }
-        return null;
     }
 
     @Override
     public String captureOrder(String orderId) {
         Payment payment = paymentRepository.findByPaypalOrderId(orderId);
 
-        if (payment == null || payment.getStatus() != PaymentStatus.CREATED) {
-            return "No matching order found or order already processed.";
+        if (payment == null) {
+            throw new PaymentNotFoundException("No payment found for orderId: " + orderId);
+        }
+        if (payment.getStatus() != PaymentStatus.CREATED) {
+            throw new InvalidPaymentStatusException("Payment already processed or canceled for orderId: " + orderId);
         }
 
         try {
@@ -95,32 +100,35 @@ public class PayPalServiceImpl implements PayPalService {
             if (capturedOrder != null) {
                 updatePaymentStatus(capturedOrder.id(), "CAPTURED");
                 payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
-                notifyPaymentConfirmed(payment.getReservationId()); //Notify venue service that the user has paid
+                notifyPaymentConfirmed(payment.getReservationId()); // Notify venue service that the user has paid
                 return "Order captured successfully. Order ID: " + capturedOrder.id();
             }
-            return "Failed to capture order.";
+            throw new OrderCaptureException("Failed to capture order with orderId: " + orderId);
         } catch (IOException e) {
-            logger.error("Error capturing order: {}", e.getMessage());
-            return "Error capturing order: " + e.getMessage();
+            throw new OrderCaptureException("Error capturing PayPal order", e);
         }
     }
 
     @Override
-    public Order getOrderDetails(String orderId) throws IOException {
-        return payPalClient.getOrderDetails(orderId);
+    public Order getOrderDetails(String orderId) {
+        try {
+            return payPalClient.getOrderDetails(orderId);
+        } catch (IOException e) {
+            throw new OrderRetrievalException("Failed to retrieve PayPal order details", e);
+        }
     }
 
     @Override
     public String cancelOrder(String orderId) {
-        // Look up the Payment record by PayPal order ID
         Payment payment = paymentRepository.findByPaypalOrderId(orderId);
 
-        // Check if the payment exists and is still in 'CREATED' status
-        if (payment == null || payment.getStatus() != PaymentStatus.CREATED) {
-            return "No matching order found or order already processed.";
+        if (payment == null) {
+            throw new PaymentNotFoundException("No payment found for orderId: " + orderId);
+        }
+        if (payment.getStatus() != PaymentStatus.CREATED) {
+            throw new InvalidPaymentStatusException("Cannot cancel a payment that is not in CREATED status.");
         }
 
-        // Update the payment status to 'CANCELED' and save it
         payment.setStatus(PaymentStatus.CANCELED);
         payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
         paymentRepository.save(payment);
@@ -128,18 +136,17 @@ public class PayPalServiceImpl implements PayPalService {
         return "The payment has been canceled successfully.";
     }
 
-
     private void updatePaymentStatus(String paypalOrderId, String status) {
         Payment payment = paymentRepository.findByPaypalOrderId(paypalOrderId);
-        if (payment != null) {
-            payment.setStatus(PaymentStatus.valueOf(status));
-            payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
-            paymentRepository.save(payment);
+        if (payment == null) {
+            throw new PaymentNotFoundException("No payment found for orderId: " + paypalOrderId);
         }
+        payment.setStatus(PaymentStatus.valueOf(status));
+        payment.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
+        paymentRepository.save(payment);
     }
 
     public void notifyPaymentConfirmed(Long reservationId) {
         rabbitTemplate.convertAndSend("paymentExchange", "payment.confirmed", reservationId);
     }
-    
 }
