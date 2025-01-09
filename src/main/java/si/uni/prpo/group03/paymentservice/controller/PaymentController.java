@@ -1,6 +1,8 @@
 package si.uni.prpo.group03.paymentservice.controller;
 
+import si.uni.prpo.group03.paymentservice.dto.PayResponseDTO;
 import si.uni.prpo.group03.paymentservice.dto.PaymentRequestDTO;
+import si.uni.prpo.group03.paymentservice.dto.PaymentResponseDTO;
 import si.uni.prpo.group03.paymentservice.service.interfaces.PayPalService;
 import com.paypal.orders.Order;
 
@@ -8,6 +10,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.io.IOException;
+import java.util.List;
+
 
 @RestController
 @RequestMapping("/api/payments")
@@ -70,6 +74,22 @@ public class PaymentController {
             }
         } catch (IOException e) {
             return ResponseEntity.status(500).body(null);
+        }
+    }
+
+    @GetMapping("/user")
+    public ResponseEntity<List<PayResponseDTO>> getPaymentsByUserId(
+            @RequestHeader("X-User-Id") String xUserId) {
+        try {
+            Long userId = Long.parseLong(xUserId);
+            List<PayResponseDTO> payments = payPalService.getPaymentsByUserId(userId);
+            if (payments != null && !payments.isEmpty()) {
+                return ResponseEntity.ok(payments);
+            } else {
+                return ResponseEntity.status(404).body(null); // No payments found
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(null); // Handle unexpected errors
         }
     }
 }
