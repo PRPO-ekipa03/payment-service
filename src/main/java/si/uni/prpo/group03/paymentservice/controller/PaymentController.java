@@ -20,13 +20,17 @@ public class PaymentController {
         this.payPalService = payPalService;
     }
 
-    // Endpoint to create a PayPal order - will have to be chnaged to use JWT later
     // Method expects to get reservatinID as query parameter
     @PostMapping("/create")
-    public ResponseEntity<String> createOrder(@RequestBody PaymentRequestDTO paymentRequest, @RequestParam(name = "reservationId", required = true) Long reservationId) {
+    public ResponseEntity<String> createOrder(
+        @RequestBody PaymentRequestDTO paymentRequest, 
+        @RequestParam(name = "reservationId", required = true) Long reservationId,
+        @RequestHeader("X-User-Id") String xUserId
+    ) {
         try {
-            String approvalUrl = payPalService.createOrder(paymentRequest, reservationId);
-            if (approvalUrl != null) {
+            Long userId = Long.parseLong(xUserId); // Convert userId from header to Long
+            String approvalUrl = payPalService.createOrder(paymentRequest, reservationId, userId);
+                       if (approvalUrl != null) {
                 return ResponseEntity.ok(approvalUrl); // Return URL to redirect user for approval
             } else {
                 return ResponseEntity.status(500).body("Failed to create order");

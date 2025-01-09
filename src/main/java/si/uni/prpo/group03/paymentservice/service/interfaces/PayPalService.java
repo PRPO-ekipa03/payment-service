@@ -5,7 +5,7 @@ import si.uni.prpo.group03.paymentservice.dto.PaymentRequestDTO;
 import java.io.IOException;
 
 public interface PayPalService {
-    String createOrder(PaymentRequestDTO paymentRequest, Long reservationId) throws IOException;
+    String createOrder(PaymentRequestDTO paymentRequest, Long reservationId, Long userId) throws IOException;
     String captureOrder(String orderId);
     Order getOrderDetails(String orderId) throws IOException;
     String cancelOrder(String orderId);

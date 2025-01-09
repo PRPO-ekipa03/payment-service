@@ -39,7 +39,7 @@ public class PayPalServiceImpl implements PayPalService {
     }
 
     @Override
-    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId) {
+    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId, Long userId) {
         OrderRequest orderRequest = new OrderRequest();
         orderRequest.checkoutPaymentIntent("CAPTURE");
 
@@ -65,7 +65,7 @@ public class PayPalServiceImpl implements PayPalService {
             String paypalOrderId = createdOrder.id();
 
             Payment payment = paymentMapper.toPayment(paymentRequest);
-            payment.setUserId(1L); // Set user ID accordingly - 1 used for testing
+            payment.setUserId(userId); // Use provided userId
             payment.setPaypalOrderId(paypalOrderId);
             payment.setStatus(PaymentStatus.CREATED);
             payment.setCreatedAt(new Timestamp(System.currentTimeMillis()));
