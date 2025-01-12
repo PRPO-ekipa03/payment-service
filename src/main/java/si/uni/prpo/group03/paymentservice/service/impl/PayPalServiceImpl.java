@@ -2,7 +2,9 @@ package si.uni.prpo.group03.paymentservice.service.impl;
 
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import si.uni.prpo.group03.paymentservice.client.PayPalClient;
+import si.uni.prpo.group03.paymentservice.dto.PayResponseDTO;
 import si.uni.prpo.group03.paymentservice.dto.PaymentRequestDTO;
+import si.uni.prpo.group03.paymentservice.dto.PaymentResponseDTO;
 import si.uni.prpo.group03.paymentservice.model.Payment;
 import si.uni.prpo.group03.paymentservice.model.Payment.PaymentStatus;
 import si.uni.prpo.group03.paymentservice.mapper.PaymentMapper;
@@ -17,6 +19,7 @@ import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class PayPalServiceImpl implements PayPalService {
@@ -39,7 +42,7 @@ public class PayPalServiceImpl implements PayPalService {
     }
 
     @Override
-    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId) {
+    public String createOrder(PaymentRequestDTO paymentRequest, Long reservationId, Long userId) {
         OrderRequest orderRequest = new OrderRequest();
         orderRequest.checkoutPaymentIntent("CAPTURE");
 
@@ -65,7 +68,7 @@ public class PayPalServiceImpl implements PayPalService {
             String paypalOrderId = createdOrder.id();
 
             Payment payment = paymentMapper.toPayment(paymentRequest);
-            payment.setUserId(1L); // Set user ID accordingly - 1 used for testing
+            payment.setUserId(userId); // Use provided userId
             payment.setPaypalOrderId(paypalOrderId);
             payment.setStatus(PaymentStatus.CREATED);
             payment.setCreatedAt(new Timestamp(System.currentTimeMillis()));
@@ -134,6 +137,14 @@ public class PayPalServiceImpl implements PayPalService {
         paymentRepository.save(payment);
 
         return "The payment has been canceled successfully.";
+    }
+
+    @Override
+    public List<PayResponseDTO> getPaymentsByUserId(Long userId) {
+        List<Payment> payments = paymentRepository.findByUserId(userId);
+        return payments.stream()
+                .map(paymentMapper::toPayResponseDTO) // Use the mapper here
+                .collect(Collectors.toList());
     }
 
     private void updatePaymentStatus(String paypalOrderId, String status) {
